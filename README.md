@@ -1,5 +1,5 @@
 # projetos-if702
-Este repositório contém os projetos e experimentos para a disciplina de **Redes Neurais** do CIn-UFPE desenvolvidos por [César Rio](https://github.com/CesarC15), [Gabriel Marques](https://github.com/marquesgbr), [Lucas Carvalho](https://github.com/LucasSilvaa0), [Maria Fernanda](https://github.com/MariaFFA) e [Thomaz Cabral](https://github.com/usuario5).
+Este repositório contém os projetos e experimentos para a disciplina de Redes Neurais do CIn-UFPE desenvolvidos por [César Rio](https://github.com/CesarC15), [Gabriel Marques](https://github.com/marquesgbr), [Lucas Carvalho](https://github.com/LucasSilvaa0), [Maria Fernanda](https://github.com/MariaFFA) e [Thomaz Cabral](https://github.com/usuario5).
 
 ---
 
