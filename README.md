@@ -6,6 +6,7 @@ Este repositório contém os projetos e experimentos para a disciplina de Redes 
 ## Estrutura do Repositório
 
 * `mini-projeto-1/`: Classificação de imagens no dataset CIFAR-10 usando MLPs e CNNs.
+* `mini-projeto-2/`: Previsão do valor do Bitcoin usando LSTM em séries temporais.
 
 ---
 
