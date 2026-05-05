@@ -85,6 +85,6 @@ Arquivo relacionado:
 - **POCID (Prediction of Change in Direction)**: métrica direcional que avalia o percentual de acertos na **mudança de tendência** (se o modelo acerta subida/queda entre instantes).
 
 ### Links Importantes
-- **Documento de Especificação:** [Aula-Miniprojeto1-MLP-CNN-cifar10-vf.pdf](https://classroom.google.com/c/ODQ2MDkwNTk4MzU2/a/Nzk3MzIyOTYxOTg2/details)
+- **Documento de Especificação:** [Aula-Miniprojeto-LSTMs-2025.pdf](https://classroom.google.com/c/ODQ2MDkwNTk4MzU2/a/Nzk3MzIyOTYxOTg2/details)
 - **Notebook (modelo simples):** `mini-projeto-2/Equipe_2_Miniprojeto_LSTM_bitcoins_simples.ipynb`
 - **Notebook (modelo avançado):** `mini-projeto-2/Equipe_2_Miniprojeto_LSTM_bitcoins.ipynb`
