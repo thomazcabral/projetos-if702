@@ -3,7 +3,6 @@ from pathlib import Path
 
 import pandas as pd
 
-
 def split_no_replacement(df, train_frac, val_frac, test_frac, seed):
     if round(train_frac + val_frac + test_frac, 10) != 1.0:
         raise ValueError("Fractions must sum to 1.0")
@@ -21,24 +20,11 @@ def split_no_replacement(df, train_frac, val_frac, test_frac, seed):
     return train, val, test
 
 
-def oversample_minority(df, target_col, seed):
-    counts = df[target_col].value_counts(dropna=False)
-    if len(counts) != 2:
-        raise ValueError("Target column must have exactly 2 classes")
+def oversample_to_match(minority_df, target_size, seed):
+    if len(minority_df) >= target_size:
+        return minority_df.copy()
 
-    majority_label = counts.idxmax()
-    minority_label = counts.idxmin()
-    majority = df[df[target_col] == majority_label]
-    minority = df[df[target_col] == minority_label]
-
-    if len(minority) == len(majority):
-        return df.copy(), majority_label, minority_label
-
-    minority_upsampled = minority.sample(
-        n=len(majority), replace=True, random_state=seed
-    ).reset_index(drop=True)
-    balanced = pd.concat([majority.reset_index(drop=True), minority_upsampled], ignore_index=True)
-    return balanced, majority_label, minority_label
+    return minority_df.sample(n=target_size, replace=True, random_state=seed).reset_index(drop=True)
 
 
 def save_split(output_dir, prefix, train, val, test):
@@ -50,7 +36,9 @@ def save_split(output_dir, prefix, train, val, test):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Balance classes by Churn and split each class 50/25/25."
+        description=(
+            "Split each class 50/25/25, then oversample minority in train/val only."
+        )
     )
     parser.add_argument(
         "--input",
@@ -83,10 +71,15 @@ def main():
 
     df = pd.read_csv(input_path)
 
-    balanced, majority_label, minority_label = oversample_minority(df, args.target, args.seed)
+    counts = df[args.target].value_counts(dropna=False)
+    if len(counts) != 2:
+        raise ValueError("Target column must have exactly 2 classes")
 
-    class_major = balanced[balanced[args.target] == majority_label]
-    class_minor = balanced[balanced[args.target] == minority_label]
+    majority_label = counts.idxmax()
+    minority_label = counts.idxmin()
+
+    class_major = df[df[args.target] == majority_label]
+    class_minor = df[df[args.target] == minority_label]
 
     train_major, val_major, test_major = split_no_replacement(
         class_major, 0.5, 0.25, 0.25, args.seed
@@ -95,15 +88,27 @@ def main():
         class_minor, 0.5, 0.25, 0.25, args.seed
     )
 
-    save_split(output_dir, f"class_{majority_label}_major", train_major, val_major, test_major)
-    save_split(output_dir, f"class_{minority_label}_minor", train_minor, val_minor, test_minor)
+    train_minor_bal = oversample_to_match(train_minor, len(train_major), args.seed)
+    val_minor_bal = oversample_to_match(val_minor, len(val_major), args.seed)
 
-    print("Balanced counts:")
-    print(balanced[args.target].value_counts())
-    print("Majority class splits:")
-    print(f"  train={len(train_major)} val={len(val_major)} test={len(test_major)}")
-    print("Minority class splits:")
-    print(f"  train={len(train_minor)} val={len(val_minor)} test={len(test_minor)}")
+    train = pd.concat([train_major, train_minor_bal], ignore_index=True)
+    val = pd.concat([val_major, val_minor_bal], ignore_index=True)
+    test = pd.concat([test_major, test_minor], ignore_index=True)
+
+    train = train.sample(frac=1.0, random_state=args.seed).reset_index(drop=True)
+    val = val.sample(frac=1.0, random_state=args.seed).reset_index(drop=True)
+    test = test.sample(frac=1.0, random_state=args.seed).reset_index(drop=True)
+
+    save_split(output_dir, args.target.lower(), train, val, test)
+
+    print("Original counts:")
+    print(df[args.target].value_counts())
+    print("Train counts (balanced):")
+    print(train[args.target].value_counts())
+    print("Val counts (balanced):")
+    print(val[args.target].value_counts())
+    print("Test counts (original):")
+    print(test[args.target].value_counts())
 
 
 if __name__ == "__main__":
