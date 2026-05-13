@@ -11,7 +11,7 @@ scikit-learn>=1.2
 
 # Lib de Modelos de Gradient Boosting
 
-# 2 Modelos baseados em [
+# 2 Modelos baseados em árvore de decisão
 xgboost>=1.7    # Modelo mais pesado 
 # lightgbm>=3.3 ()  # Modelo mais leve
 
