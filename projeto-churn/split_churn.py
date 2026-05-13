@@ -101,14 +101,26 @@ def main():
 
     save_split(output_dir, args.target.lower(), train, val, test)
 
+  
+
+    original_count_minority = len(class_minor)
+    original_count_majority = len(class_major)
+    
     print("Original counts:")
-    print(df[args.target].value_counts())
+    print(f"No:   {original_count_majority} ({original_count_majority/len(df):.2%})")
+    print(f"Yes:  {original_count_minority} ({original_count_minority/len(df):.2%})")
+
     print("Train counts (balanced):")
-    print(train[args.target].value_counts())
+    print(f"No:   {len(train_major)} ({len(train_major)/len(train):.2%})")
+    print(f"Yes:  {len(train_minor_bal)} ({len(train_minor_bal)/len(train):.2%})")
+
     print("Val counts (balanced):")
-    print(val[args.target].value_counts())
+    print(f"No:   {len(val_major)} ({len(val_major)/len(val):.2%})")
+    print(f"Yes:  {len(val_minor_bal)} ({len(val_minor_bal)/len(val):.2%})")
+
     print("Test counts (original):")
-    print(test[args.target].value_counts())
+    print(f"No:   {len(test_major)} ({len(test_major)/len(test):.2%})")
+    print(f"Yes:  {len(test_minor)} ({len(test_minor)/len(test):.2%})")
 
 
 if __name__ == "__main__":
