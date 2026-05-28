@@ -29,13 +29,16 @@ def _encode_binary_labels(y: np.ndarray) -> np.ndarray:
 def load_split_datasets(
     data_dir: str = "datasets",
     prefix: str = "churn",
+    train_suffix: str = "_train.csv",
+    val_suffix: str = "_val.csv",
+    test_suffix: str = "_test.csv",
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     base_dir = os.path.dirname(os.path.abspath(__file__))
     data_path = os.path.join(base_dir, data_dir)
 
-    train_path = os.path.join(data_path, f"{prefix}_train.csv")
-    val_path = os.path.join(data_path, f"{prefix}_val.csv")
-    test_path = os.path.join(data_path, f"{prefix}_test.csv")
+    train_path = os.path.join(data_path, f"{prefix}{train_suffix}")
+    val_path = os.path.join(data_path, f"{prefix}{val_suffix}")
+    test_path = os.path.join(data_path, f"{prefix}{test_suffix}")
 
     if not os.path.exists(train_path):
         raise FileNotFoundError(f"Missing file: {train_path}")
@@ -48,6 +51,21 @@ def load_split_datasets(
     val_df = pd.read_csv(val_path)
     test_df = pd.read_csv(test_path)
     return train_df, val_df, test_df
+
+
+def get_X_y_from_split(
+    train_df: pd.DataFrame, 
+    val_df: pd.DataFrame, 
+    test_df: pd.DataFrame, 
+    target_col: str
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    X_train = train_df.drop(columns=[target_col])
+    y_train = np.asarray(train_df[target_col], dtype=np.int64)
+    X_val = val_df.drop(columns=[target_col])
+    y_val = np.asarray(val_df[target_col], dtype=np.int64)
+    X_test = test_df.drop(columns=[target_col])
+    y_test = np.asarray(test_df[target_col], dtype=np.int64)
+    return (X_train.values.astype(np.float32), y_train, X_val.values.astype(np.float32), y_val, X_test.values.astype(np.float32), y_test)
 
 
 def _coerce_numeric_columns(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
@@ -75,7 +93,6 @@ def preprocess_data(
     Optional[np.ndarray],
     Optional[np.ndarray],
     Optional[np.ndarray],
-    Optional[RobustScaler],
     Iterable[str],
 ]:
     train_df = _coerce_numeric_columns(train_df, target_col)
@@ -118,7 +135,6 @@ def preprocess_data(
         y_val,
         X_test_enc.values.astype(np.float32),
         y_test,
-        scaler,
         X_train_enc.columns,
     )
 
@@ -127,14 +143,17 @@ def load_and_prepare_datasets(
     data_dir: str = "datasets",
     prefix: str = "churn",
     target_col: str = "Churn",
+    train_suffix: str = "_train.csv",
+    val_suffix: str = "_val.csv",
+    test_suffix: str = "_test.csv",
 ) -> Tuple[
     pd.DataFrame,
     pd.DataFrame,
     pd.DataFrame,
-    RobustScaler,
 ]:
-    train_df, val_df, test_df = load_split_datasets(data_dir=data_dir, prefix=prefix)
-    X_train, y_train, X_val, y_val, X_test, y_test, scaler, _ = preprocess_data(
+    train_df, val_df, test_df = load_split_datasets(data_dir=data_dir, prefix=prefix, 
+                                                    train_suffix=train_suffix, val_suffix=val_suffix, test_suffix=test_suffix)
+    X_train, y_train, X_val, y_val, X_test, y_test,  _ = preprocess_data(
         train_df, val_df=val_df, test_df=test_df, target_col=target_col
     )
     train_df_prepared = pd.DataFrame(X_train, columns=train_df.drop(columns=[target_col]).columns)
@@ -149,5 +168,4 @@ def load_and_prepare_datasets(
         train_df_prepared,
         val_df_prepared,
         test_df_prepared,
-        scaler,
     )

@@ -440,6 +440,10 @@ def build_hyperparameter_space(
     exclude_params: Optional[Iterable[str]] = None,
     extra_params: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Dict[str, Any]]:
+    """
+    Build a hyperparameter space based on the model class constructor signature.
+    """
+
     overrides = overrides or {}
     include_set = set(include_params) if include_params else None
     exclude_set = set(exclude_params) if exclude_params else set()
