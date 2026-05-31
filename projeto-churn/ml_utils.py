@@ -2,7 +2,7 @@ import math
 import inspect
 from copy import deepcopy
 from typing import Any, Dict, Iterable, Optional, Tuple
-
+import optuna
 import numpy as np
 import pandas as pd
 import torch
@@ -16,23 +16,31 @@ from sklearn.metrics import (
     recall_score,
     f1_score,
     roc_auc_score,
+    log_loss,
+    mean_squared_error,
     roc_curve,
     confusion_matrix,
 )
+from scikitplot.helpers import binary_ks_curve
 
 import matplotlib.pyplot as plt
 
 
-EXPERIMENT_EPOCHS = 10000
+TRAIN_EPOCHS = 10000
 RANDOM_STATE_SAMPLE = 42
 RANDOM_STATE_MODEL = 42
 
-DEFAULT_EPOCHS = 100
+SEARCH_EPOCHS = 100
 DEFAULT_EARLY_STOPPING_PATIENCE = 10
 DEFAULT_EARLY_STOPPING_DELTA = 0.001
 
-SCORING_METRIC = "f1"
+AVAILABLE_METRICS_SEARCH = ["accuracy", "precision", "recall", "f1", "val_loss", "auroc", "ks"]
+AVAILABLE_LOSSES = ["cross_entropy", "bce_with_logits", "mse"]
+DEFAULT_SCORING_METRIC = "ks"
 
+
+
+### Helper functions gerais
 
 def get_default_device() -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -70,6 +78,9 @@ def _logits_to_scores(logits: torch.Tensor) -> torch.Tensor:
     return torch.softmax(logits, dim=1)[:, 1]
 
 
+
+#### Predição e avaliação de modelos
+
 def _predict_scores_torch(
     model: nn.Module,
     X: Any,
@@ -102,11 +113,38 @@ def _predict_scores_proba(model: Any, X: Any) -> np.ndarray:
     return proba[:, 1]
 
 
+def _evaluate_loss(
+    model: nn.Module,
+    dataloader: DataLoader,
+    loss_fn: nn.Module,
+    device: torch.device,
+) -> Tuple[float, np.ndarray]:
+    model.eval()
+    running_loss = 0.0
+    scores = []
+
+    with torch.no_grad():
+        for batch_X, batch_y in dataloader:
+            batch_X = batch_X.to(device)
+            batch_y = batch_y.to(device)
+
+            outputs = model(batch_X)
+            loss = loss_fn(outputs, batch_y)
+            running_loss += loss.item() * batch_X.size(0)
+
+            batch_scores = _logits_to_scores(outputs)
+            scores.append(batch_scores.detach().cpu().numpy())
+
+ 
+    avg_loss = running_loss / len(dataloader.dataset)
+    return avg_loss, np.concatenate(scores, axis=0)
+
+
 def predict_scores(
     model: Any,
     X: Any,
     device: Optional[torch.device] = None,
-    batch_size: int = 1024,
+    batch_size: int = 32,
 ) -> np.ndarray:
     if isinstance(model, nn.Module):
         device = device or get_default_device()
@@ -118,27 +156,72 @@ def predict_scores(
         return np.asarray(model.predict(X))
     raise ValueError("Model does not support prediction.")
 
+def ks_test(
+    y_true: Any,
+    y_score: Any
+) -> Dict[str, Any]:
+    """Calcula a estatística KS e, opcionalmente, o melhor limiar e a porcentagem correspondente, 
+    além de gerar um gráfico da curva KS se solicitado."""
+
+    y_true_arr = _encode_binary_labels(y_true)
+    y_score_arr = _to_numpy(y_score).astype(float)
+
+    (
+        thresholds,
+        pct1,
+        pct2,
+        ks_statistic,
+        max_distance_at,
+        _,
+    ) = binary_ks_curve(y_true_arr, y_score_arr)
+
+    idxs = np.where(thresholds == max_distance_at)[0]
+    idx = int(idxs[0]) if len(idxs) else int(np.argmax(pct1 - pct2))
+
+    n0 = int(np.sum(y_true_arr == 0))
+    n1 = int(np.sum(y_true_arr == 1))
+    total = n0 + n1
+    if total > 0:
+        best_percentage = float(((pct1[idx] * n0 + pct2[idx] * n1) / total) * 100.0)
+    else:
+        best_percentage = 0.0
+
+    probas = np.column_stack([1.0 - y_score_arr, y_score_arr])
+    result = {"ks_stat": float(ks_statistic), "probas": probas}
+
+
+    result.update(
+        {
+            "best_threshold": float(max_distance_at),
+            "best_percentage": best_percentage,
+        }
+    )
+
+    return result
 
 def compute_metrics(
     y_true: Any,
     y_pred: Any,
     y_score: Optional[Any] = None,
 ) -> Dict[str, Any]:
+    """Retorna um dicionário com métricas de avaliação para classificação binária, incluindo acurácia, precisão, recall, F1, AUROC e KS."""
     y_true_arr = _encode_binary_labels(y_true)
     y_pred_arr = _encode_binary_labels(y_pred)
-
+    auroc = None
+    ks_stat = None
+    if y_score is not None:
+        y_score_arr = _to_numpy(y_score)
+        auroc = roc_auc_score(y_true_arr, y_score_arr)
+        ks_stat = ks_test(y_true_arr, y_score_arr)["ks_stat"]
+        
     metrics = {
         "accuracy": accuracy_score(y_true_arr, y_pred_arr),
         "precision": precision_score(y_true_arr, y_pred_arr, zero_division=0),
         "recall": recall_score(y_true_arr, y_pred_arr, zero_division=0),
         "f1": f1_score(y_true_arr, y_pred_arr, zero_division=0),
+        "auroc": auroc,
+        "ks_stat": ks_stat,
     }
-
-    if y_score is not None:
-        try:
-            metrics["auroc"] = roc_auc_score(y_true_arr, _to_numpy(y_score))
-        except ValueError:
-            metrics["auroc"] = None
 
     cm = confusion_matrix(y_true_arr, y_pred_arr, labels=[0, 1])
     metrics["confusion_matrix"] = {
@@ -150,104 +233,23 @@ def compute_metrics(
 
     return metrics
 
-
 def evaluate_model(
     model: Any,
-    X_train: Any,
-    X_test: Optional[Any] = None,
-    y_train: Optional[Any] = None,
-    y_test: Optional[Any] = None,
-    model_name: Optional[str] = None,
+    X: Any,
+    y: Optional[Any] = None,
     device: Optional[torch.device] = None,
-    batch_size: int = 1024,
+    batch_size: int = 32,
     threshold: float = 0.5,
-) -> Tuple[Dict[str, Any], Dict[str, Any], np.ndarray]:
-    if X_test is None:
-        if y_train is None:
-            raise ValueError("y_train is required when X_test is not provided.")
-        scores = predict_scores(model, X_train, device=device, batch_size=batch_size)
-        preds = (scores >= threshold).astype(int)
-        metrics = compute_metrics(y_train, preds, scores)
-        return metrics, preds, scores
+) -> Tuple[Dict[str, Any], np.ndarray, np.ndarray]:
+    """Retorna um dicionário com métricas de avaliação, as previsões binárias e os scores de probabilidade para um modelo de classificação binária"""
+    if X is None or y is None:
+        raise ValueError("X and y are required for evaluation.")
 
-    if y_train is None or y_test is None:
-        raise ValueError("y_train and y_test are required when X_test is provided.")
+    scores = predict_scores(model, X, device=device, batch_size=batch_size)
+    preds = (scores >= threshold).astype(int)
+    metrics = compute_metrics(y, preds, scores)
 
-    train_scores = predict_scores(model, X_train, device=device, batch_size=batch_size)
-    train_preds = (train_scores >= threshold).astype(int)
-    train_metrics = compute_metrics(y_train, train_preds, train_scores)
-
-    test_scores = predict_scores(model, X_test, device=device, batch_size=batch_size)
-    test_preds = (test_scores >= threshold).astype(int)
-    test_metrics = compute_metrics(y_test, test_preds, test_scores)
-
-    if model_name:
-        train_metrics["model"] = model_name
-        test_metrics["model"] = model_name
-
-    return train_metrics, test_metrics, test_preds
-
-
-def ks_test(
-    y_true: Any,
-    y_score: Any,
-    return_best: bool = False,
-    plot: bool = False,
-    ax: Optional[plt.Axes] = None,
-) -> Dict[str, Any]:
-    if not return_best and not plot:
-        raise ValueError("Select return_best and/or plot.")
-
-    y_true_arr = _encode_binary_labels(y_true)
-    y_score_arr = _to_numpy(y_score).astype(float)
-
-    order = np.argsort(-y_score_arr)
-    scores_sorted = y_score_arr[order]
-    labels_sorted = y_true_arr[order]
-
-    positives = labels_sorted == 1
-    negatives = labels_sorted == 0
-
-    if positives.sum() == 0 or negatives.sum() == 0:
-        raise ValueError("Both classes are required to compute KS.")
-
-    cum_pos = np.cumsum(positives) / positives.sum()
-    cum_neg = np.cumsum(negatives) / negatives.sum()
-    ks_values = np.abs(cum_pos - cum_neg)
-
-    best_idx = int(np.argmax(ks_values))
-    ks_stat = float(ks_values[best_idx])
-    best_threshold = float(scores_sorted[best_idx])
-    best_percentage = float((best_idx + 1) / len(scores_sorted) * 100.0)
-
-    result = {"ks_stat": ks_stat}
-
-    if return_best:
-        result.update(
-            {
-                "best_threshold": best_threshold,
-                "best_percentage": best_percentage,
-            }
-        )
-
-    if plot:
-        if ax is None:
-            fig, ax = plt.subplots(figsize=(10, 6))
-        else:
-            fig = ax.figure
-
-        population_pct = np.arange(1, len(scores_sorted) + 1) / len(scores_sorted) * 100.0
-        ax.plot(population_pct, cum_pos, label="Cumulative positive")
-        ax.plot(population_pct, cum_neg, label="Cumulative negative")
-        ax.axvline(best_percentage, color="red", linestyle="--", label="Best KS")
-        ax.set_xlabel("Population percentage")
-        ax.set_ylabel("Cumulative fraction")
-        ax.set_title(f"KS statistic = {ks_stat:.4f}")
-        ax.legend()
-        result.update({"fig": fig, "ax": ax})
-
-    return result
-
+    return metrics, preds, scores
 
 def get_loss_fn(loss_name: str = "cross_entropy", **kwargs: Any) -> nn.Module:
     if isinstance(loss_name, nn.Module):
@@ -257,44 +259,36 @@ def get_loss_fn(loss_name: str = "cross_entropy", **kwargs: Any) -> nn.Module:
         return nn.CrossEntropyLoss(**kwargs)
     if name == "bce_with_logits":
         return nn.BCEWithLogitsLoss(**kwargs)
+    if name == "mse":
+        return nn.MSELoss(**kwargs)
     raise ValueError(f"Unsupported loss: {loss_name}")
 
 
-def prepare_dataloaders(
-    X_train: Any,
-    y_train: Any,
-    X_val: Optional[Any] = None,
-    y_val: Optional[Any] = None,
-    n_batches: int = 1,
-    batch_size: Optional[int] = None,
+
+### Preparação de dataloaders para PyTorch
+
+def prepare_dataloader(
+    X: Any,
+    y: Any,
+    batch_size: int = 32,
     shuffle: bool = True,
-) -> Tuple[DataLoader, Optional[DataLoader], int]:
-    X_train_np = _to_numpy(X_train).astype(np.float32)
-    y_train_np = _encode_binary_labels(y_train).astype(np.int64)
+) -> DataLoader:
+    X_np = _to_numpy(X).astype(np.float32)
+    y_np = _encode_binary_labels(y).astype(np.int64)
 
-    if batch_size is None:
-        n_batches = max(1, int(n_batches))
-        batch_size = max(1, int(math.ceil(len(X_train_np) / n_batches)))
-
-    train_dataset = TensorDataset(
-        torch.tensor(X_train_np, dtype=torch.float32),
-        torch.tensor(y_train_np, dtype=torch.long),
+    dataset = TensorDataset(
+        torch.tensor(X_np, dtype=torch.float32),
+        torch.tensor(y_np, dtype=torch.long),
     )
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle)
+    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
 
-    val_loader = None
-    if X_val is not None and y_val is not None:
-        X_val_np = _to_numpy(X_val).astype(np.float32)
-        y_val_np = _encode_binary_labels(y_val).astype(np.int64)
-        val_batch_size = max(1, int(math.ceil(len(X_val_np) / n_batches)))
-        val_dataset = TensorDataset(
-            torch.tensor(X_val_np, dtype=torch.float32),
-            torch.tensor(y_val_np, dtype=torch.long),
-        )
-        val_loader = DataLoader(val_dataset, batch_size=val_batch_size, shuffle=False)
+    return data_loader
 
-    return train_loader, val_loader, batch_size
 
+
+
+
+#### Treinamento e inferência de modelos PyTorch
 
 def train_one_epoch(
     model: nn.Module,
@@ -320,32 +314,6 @@ def train_one_epoch(
     return running_loss / len(dataloader.dataset)
 
 
-def _evaluate_epoch(
-    model: nn.Module,
-    dataloader: DataLoader,
-    loss_fn: nn.Module,
-    device: torch.device,
-) -> Tuple[float, np.ndarray]:
-    model.eval()
-    running_loss = 0.0
-    scores = []
-
-    with torch.no_grad():
-        for batch_X, batch_y in dataloader:
-            batch_X = batch_X.to(device)
-            batch_y = batch_y.to(device)
-
-            outputs = model(batch_X)
-            loss = loss_fn(outputs, batch_y)
-            running_loss += loss.item() * batch_X.size(0)
-
-            batch_scores = _logits_to_scores(outputs)
-            scores.append(batch_scores.detach().cpu().numpy())
-
-    avg_loss = running_loss / len(dataloader.dataset)
-    return avg_loss, np.concatenate(scores, axis=0)
-
-
 def train_model(
     model: nn.Module,
     X_train: Any,
@@ -355,47 +323,32 @@ def train_model(
     optimizer: torch.optim.Optimizer,
     loss_fn: Optional[nn.Module] = None,
     device: Optional[torch.device] = None,
-    n_batches: int = 1,
-    batch_size: Optional[int] = None,
-    epochs: int = DEFAULT_EPOCHS,
+    batch_size: int = 32,
+    epochs: int = TRAIN_EPOCHS,
     patience: int = DEFAULT_EARLY_STOPPING_PATIENCE,
     min_delta: float = DEFAULT_EARLY_STOPPING_DELTA,
-    threshold: float = 0.5,
 ) -> Dict[str, Any]:
     device = device or get_default_device()
     loss_fn = loss_fn or get_loss_fn()
 
     model.to(device)
-    train_loader, val_loader, batch_size = prepare_dataloaders(
-        X_train,
-        y_train,
-        X_val=X_val,
-        y_val=y_val,
-        n_batches=n_batches,
-        batch_size=batch_size,
-    )
+    train_loader = prepare_dataloader(X_train, y_train, batch_size=batch_size,)
+    val_loader = prepare_dataloader(X_val, y_val, batch_size=batch_size, shuffle=False)
 
-    history = {"train_loss": [], "val_loss": [], "val_ks": []}
-    best_metric = -np.inf
+    history = []
+    best_loss = -np.inf
     best_state = None
     patience_counter = 0
-
+    epochs_loss = 0
+    
     for _ in range(int(epochs)):
         train_loss = train_one_epoch(model, train_loader, optimizer, loss_fn, device)
-        history["train_loss"].append(train_loss)
+        history.append(train_loss)
+        epochs_loss += train_loss
+        avg_loss = epochs_loss / len(history)
 
-        if val_loader is None:
-            continue
-
-        val_loss, val_scores = _evaluate_epoch(model, val_loader, loss_fn, device)
-        history["val_loss"].append(val_loss)
-
-        ks_result = ks_test(y_val, val_scores, return_best=True, plot=False)
-        val_ks = ks_result["ks_stat"]
-        history["val_ks"].append(val_ks)
-
-        if val_ks > best_metric + min_delta:
-            best_metric = val_ks
+        if best_loss < avg_loss - min_delta:
+            best_loss = train_loss
             best_state = deepcopy(model.state_dict())
             patience_counter = 0
         else:
@@ -403,25 +356,22 @@ def train_model(
             if patience_counter >= patience:
                 break
 
+    val_loss, val_scores = _evaluate_loss(model, val_loader, loss_fn, device)
+    
     if best_state is not None:
         model.load_state_dict(best_state)
-
-    final_scores = predict_scores(model, X_val, device=device, batch_size=batch_size)
-    final_preds = (final_scores >= threshold).astype(int)
-    final_metrics = compute_metrics(y_val, final_preds, final_scores)
 
     return {
         "model": model,
         "history": history,
-        "metrics": final_metrics,
-        "preds": final_preds,
-        "scores": final_scores,
-        "best_metric": best_metric,
+        "best_train_loss": best_loss,
+        "val_loss": val_loss,
+        "val_scores": val_scores,
         "batch_size": batch_size,
     }
 
 
-def infer(
+def infer_class(
     model: Any,
     X: Any,
     device: Optional[torch.device] = None,
@@ -433,6 +383,55 @@ def infer(
     return preds, scores
 
 
+
+
+
+##### Busca de hiperparâmetros com Optuna
+
+
+
+#### Construção do espaço de hiperparametros
+
+def _build_param_spec(values: Any) -> Dict[str, Any]:
+    if isinstance(values, dict) and "type" in values:
+        kind = str(values.get("type")).strip().lower()
+        if kind == "categorical":
+            choices = values.get("values")
+            if choices is None:
+                choices = values.get("choices")
+            if choices is None:
+                choices = values.get("list")
+            if choices is None:
+                raise ValueError("categorical requires a list of values.")
+            return {"suggest_type": "categorical", "values": list(choices)}
+
+        if kind in {"int", "float"}:
+            args = values.get("values")
+            if args is None:
+                low = values.get("low")
+                high = values.get("high")
+                if low is None or high is None:
+                    raise ValueError("int/float requires low and high.")
+                args = [low, high, values.get("step"), values.get("log")]
+
+            if not isinstance(args, (list, tuple)) or len(args) < 2:
+                raise ValueError("int/float values must be [low, high, step?, log?].")
+
+            low = args[0]
+            high = args[1]
+            step = args[2] if len(args) > 2 else None
+            log = args[3] if len(args) > 3 else False
+            spec = {"suggest_type": kind, "args": [low, high], "kwargs": {}}
+            if step is not None:
+                spec["kwargs"]["step"] = step
+            if log:
+                spec["kwargs"]["log"] = bool(log)
+            return spec
+
+        raise ValueError(f"Unsupported suggest type: {values.get('type')}")
+    raise ValueError("Each hyperparameter must be a dict with a 'type' field.")
+
+
 def build_hyperparameter_space(
     model_class: Any,
     overrides: Optional[Dict[str, Iterable[Any]]] = None,
@@ -441,50 +440,45 @@ def build_hyperparameter_space(
     extra_params: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """
-    Build a hyperparameter space based on the model class constructor signature.
+    Modelos que usam pytorch e otimizadores customizáveis devem incluir, no espaço de busca, os parâmetros de otimização:
+        - lr
+        - weight_decay
+        - optimizer
+        - batch_size      
+    Usando os mesmos nomes acima.
+    Modelos compatíveis com sklearn podem ser otimizados usando parâmetros de modelo e métricas de avaliação padrão.
     """
-
     overrides = overrides or {}
-    include_set = set(include_params) if include_params else None
+    
+    if isinstance(include_params, dict):
+        overrides = {**overrides, **include_params}
+        include_set = set(include_params.keys())
+    else:
+        include_set = set(include_params) if include_params else None
     exclude_set = set(exclude_params) if exclude_params else set()
 
     space: Dict[str, Dict[str, Any]] = {}
+
+    if include_set is None and not overrides:
+        raise ValueError("Provide overrides or include_params to build the space.")
+
     signature = inspect.signature(model_class.__init__)
+    names = [name for name in (include_set or overrides.keys()) if name not in exclude_set]
 
-    for name, param in signature.parameters.items():
-        if name == "self":
-            continue
-        if include_set is not None and name not in include_set:
-            continue
-        if name in exclude_set:
-            continue
-
-        param_type = None
-        values = []
-
-        if param.default is not inspect.Parameter.empty:
-            param_type = type(param.default)
-            values = [param.default]
-        elif param.annotation is not inspect.Parameter.empty:
-            param_type = param.annotation
-
+    for name in names:
         if name in overrides:
-            values = list(overrides[name])
+            space[name] = _build_param_spec(overrides[name])
+            continue
 
-        space[name] = {"type": param_type, "values": values}
+        param = signature.parameters.get(name)
+        if param is None or param.default is inspect.Parameter.empty:
+            raise ValueError(f"Missing override spec for '{name}'.")
+
+        space[name] = _build_param_spec({"type": "categorical", "values": [param.default]})
 
     if extra_params:
         for name, spec in extra_params.items():
-            space[name] = {
-                "type": spec.get("type"),
-                "values": list(spec.get("values", [])),
-            }
-
-    if "n_batches" not in space:
-        space["n_batches"] = {
-            "type": int,
-            "values": list(overrides.get("n_batches", [1])),
-        }
+            space[name] = _build_param_spec(spec)
 
     return space
 
@@ -492,19 +486,34 @@ def build_hyperparameter_space(
 def print_hyperparameter_space(space: Dict[str, Dict[str, Any]]) -> None:
     print("Hyperparameter space:")
     for name, spec in space.items():
-        param_type = spec.get("type")
-        values = spec.get("values")
-        type_name = param_type.__name__ if param_type else "unknown"
-        print(f"- {name}: type={type_name}, values={values}")
+        kind = spec.get("suggest_type")
+        if kind == "categorical":
+            print(f"- {name}: type=categorical, values={spec.get('values')}")
+        else:
+            args = spec.get("args", [])
+            kwargs = spec.get("kwargs", {})
+            print(f"- {name}: type={kind}, args={args}, kwargs={kwargs}")
 
+
+
+### Funções auxiliares para sugestão correta de parametros e avaliação de métricas durante a busca 
 
 def _suggest_from_space(trial: Any, space: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     params = {}
     for name, spec in space.items():
-        values = list(spec.get("values", []))
-        if not values:
-            raise ValueError(f"Hyperparameter '{name}' has no candidate values.")
-        params[name] = trial.suggest_categorical(name, values)
+        if "suggest_type" in spec:
+            kind = spec["suggest_type"]
+            if kind == "categorical":
+                params[name] = trial.suggest_categorical(name, spec["values"])
+                continue
+            if kind == "int":
+                params[name] = trial.suggest_int(name, *spec["args"], **spec.get("kwargs", {}))
+                continue
+            if kind == "float":
+                params[name] = trial.suggest_float(name, *spec["args"], **spec.get("kwargs", {}))
+                continue
+            raise ValueError(f"Unsupported suggest type: {kind}")
+        raise ValueError(f"Missing suggest_type for '{name}'.")
     return params
 
 
@@ -531,31 +540,84 @@ def _is_torch_model_class(model_class: Any) -> bool:
         return False
 
 
-def _is_xgboost_model_class(model_class: Any) -> bool:
+def _is_sklearn_compatible_model_class(model_class: Any) -> bool:
+    """Modelos que usam fit e predict_proba, como XGBoost, LightGBM, CatBoost e muitos modelos do scikit-learn."""
     module_name = getattr(model_class, "__module__", "")
-    return "xgboost" in module_name
-
-
-def _stratified_sample(
-    X: Any,
-    y: Any,
-    frac: Optional[float],
-    random_state: int,
-) -> Tuple[np.ndarray, np.ndarray]:
-    X_np = _to_numpy(X)
-    y_np = _encode_binary_labels(y)
-    if frac is None or frac >= 1.0:
-        return X_np, y_np
-
-    X_sample, _, y_sample, _ = train_test_split(
-        X_np,
-        y_np,
-        train_size=frac,
-        stratify=y_np,
-        random_state=random_state,
+    return (
+        module_name.startswith("sklearn.")
+        or module_name.startswith("xgboost.")
+        or module_name.startswith("lightgbm.")
+        or module_name.startswith("catboost.")
     )
-    return X_sample, y_sample
 
+
+def _resolve_objective_score(
+    y_true: Any,
+    y_score: Optional[np.ndarray],
+    y_pred: Optional[np.ndarray],
+    scoring_metric: Any,
+    val_loss: Optional[float] = None,
+) -> float:
+
+    name = str(scoring_metric).strip().lower()
+    if name in {"val_loss", "loss"}:
+        if val_loss is None:
+            raise ValueError("val_loss is required for loss-based scoring.")
+        return float(val_loss)
+    if name in {"ks", "ks_test", "ks_statistic"}:
+        if y_score is None:
+            raise ValueError("y_score is required for KS.")
+        return float(ks_test(y_true, y_score)["ks_stat"])
+    if name in {"auroc", "roc_auc", "roc-auc"}:
+        if y_score is None:
+            raise ValueError("y_score is required for AUROC.")
+        return float(roc_auc_score(_encode_binary_labels(y_true), _to_numpy(y_score)))
+    if y_pred is None:
+        raise ValueError("y_pred is required for classification metrics.")
+
+    if name == "accuracy":
+        return float(accuracy_score(_encode_binary_labels(y_true), _encode_binary_labels(y_pred)))
+    if name == "precision":
+        return float(precision_score(_encode_binary_labels(y_true), _encode_binary_labels(y_pred), zero_division=0))
+    if name == "recall":
+        return float(recall_score(_encode_binary_labels(y_true), _encode_binary_labels(y_pred), zero_division=0))
+    if name == "f1":
+        return float(f1_score(_encode_binary_labels(y_true), _encode_binary_labels(y_pred), zero_division=0))
+
+    raise ValueError(f"Unsupported scoring metric: {scoring_metric}")
+
+
+def _normalize_loss_name(loss_fn: Any) -> Optional[str]:
+    if loss_fn is None:
+        return None
+    if isinstance(loss_fn, str):
+        return loss_fn.strip().lower()
+    if isinstance(loss_fn, nn.Module):
+        name = loss_fn.__class__.__name__.lower()
+    else:
+        name = str(loss_fn).strip().lower()
+
+    if name in {"crossentropyloss", "bcewithlogitsloss", "bceloss"}:
+        return "cross_entropy"
+    if name in {"mseloss", "mse"}:
+        return "mse"
+    return name
+
+
+def _compute_sklearn_loss(y_true: Any, y_score: np.ndarray, loss_name: Optional[str]) -> Optional[float]:
+    if loss_name is None:
+        return None
+    y_true_arr = _encode_binary_labels(y_true)
+    if loss_name in {"cross_entropy", "bce_with_logits"}:
+        return float(log_loss(y_true_arr, y_score))
+    if loss_name == "mse":
+        return float(mean_squared_error(y_true_arr, y_score))
+    raise ValueError(f"Unsupported loss for sklearn models: {loss_name}")
+
+
+
+
+### Funções do Optuna para executar a busca propriamente dita
 
 def optuna_objective(
     trial: Any,
@@ -565,68 +627,76 @@ def optuna_objective(
     y_train: Any,
     X_val: Any,
     y_val: Any,
+    scoring_metric: Any = DEFAULT_SCORING_METRIC,
     device: Optional[torch.device] = None,
-    epochs: int = DEFAULT_EPOCHS,
+    epochs: int = SEARCH_EPOCHS,
     patience: int = DEFAULT_EARLY_STOPPING_PATIENCE,
     min_delta: float = DEFAULT_EARLY_STOPPING_DELTA,
     threshold: float = 0.5,
-    sample_frac: Optional[float] = None,
-    random_state: int = RANDOM_STATE_SAMPLE,
     loss_fn: Optional[nn.Module] = None,
     optimizer_class: Any = torch.optim.Adam,
 ) -> float:
     params = _suggest_from_space(trial, space)
     model_params, train_params = _split_model_and_train_params(model_class, params)
 
-    n_batches = train_params.pop("n_batches", 1)
     batch_size = train_params.pop("batch_size", None)
     lr = train_params.pop("lr", train_params.pop("learning_rate", 1e-3))
     weight_decay = train_params.pop("weight_decay", 0.0)
+    optimizer_choice = train_params.pop("optimizer", train_params.pop("optimizer_class", None))
+    if optimizer_choice is not None:
+        if isinstance(optimizer_choice, str):
+            if hasattr(torch.optim, optimizer_choice):
+                optimizer_class = getattr(torch.optim, optimizer_choice)
+            else:
+                raise ValueError(f"Unknown optimizer: {optimizer_choice}")
+        else:
+            optimizer_class = optimizer_choice
 
-    X_train_s, y_train_s = _stratified_sample(X_train, y_train, sample_frac, random_state)
-    X_val_s, y_val_s = _stratified_sample(X_val, y_val, sample_frac, random_state)
+    is_torch = _is_torch_model_class(model_class)
+    is_sklearn = _is_sklearn_compatible_model_class(model_class)
+    if not (is_torch or is_sklearn):
+        raise ValueError("Unsupported model class for Optuna objective.")
 
-    if _is_torch_model_class(model_class):
-        model = model_class(**model_params)
+    model = model_class(**model_params)
+    scores = None
+    preds = None
+    val_loss = None
+
+    if is_torch:
         optimizer = optimizer_class(model.parameters(), lr=lr, weight_decay=weight_decay)
         train_result = train_model(
             model,
-            X_train_s,
-            y_train_s,
-            X_val_s,
-            y_val_s,
+            X_train,
+            y_train,
+            X_val,
+            y_val,
             optimizer,
             loss_fn=loss_fn,
             device=device,
-            n_batches=n_batches,
             batch_size=batch_size,
             epochs=epochs,
             patience=patience,
             min_delta=min_delta,
+        )
+        metrics, preds, scores = evaluate_model(
+            model,
+            X_val,
+            y_val,
+            device=device,
+            batch_size=batch_size or 32,
             threshold=threshold,
         )
-        scores = train_result["scores"]
-        ks_result = ks_test(y_val_s, scores, return_best=True, plot=False)
-        return ks_result["ks_stat"]
+        val_loss = train_result.get("val_loss")
 
-    if _is_xgboost_model_class(model_class):
-        model = model_class(**model_params)
-        try:
-            model.fit(
-                X_train_s,
-                y_train_s,
-                eval_set=[(X_val_s, y_val_s)],
-                early_stopping_rounds=patience,
-                verbose=False,
-            )
-        except TypeError:
-            model.fit(X_train_s, y_train_s)
+    if is_sklearn:
+        model.fit(X_train, y_train)
 
-        scores = predict_scores(model, X_val_s)
-        ks_result = ks_test(y_val_s, scores, return_best=True, plot=False)
-        return ks_result["ks_stat"]
+        scores = predict_scores(model, X_val)
+        preds = (scores >= threshold).astype(int)
+        loss_name = _normalize_loss_name(loss_fn)
+        val_loss = _compute_sklearn_loss(y_val, scores, loss_name)
 
-    raise ValueError("Unsupported model class for Optuna objective.")
+    return _resolve_objective_score(y_val, scores, preds, scoring_metric, val_loss=val_loss,)
 
 
 def run_optuna_search(
@@ -640,10 +710,6 @@ def run_optuna_search(
     direction: str = "maximize",
     **objective_kwargs: Any,
 ) -> Any:
-    try:
-        import optuna
-    except ImportError as exc:
-        raise ImportError("Optuna is required for hyperparameter search.") from exc
 
     def _objective(trial: Any) -> float:
         return optuna_objective(
@@ -662,6 +728,10 @@ def run_optuna_search(
     return study
 
 
+
+
+
+#### Plotagem
 def plot_metrics_history(
     history: Dict[str, Iterable[float]],
     metrics: Optional[Iterable[str]] = None,
