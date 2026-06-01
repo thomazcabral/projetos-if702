@@ -160,8 +160,7 @@ def ks_test(
     y_true: Any,
     y_score: Any
 ) -> Dict[str, Any]:
-    """Calcula a estatística KS e, opcionalmente, o melhor limiar e a porcentagem correspondente, 
-    além de gerar um gráfico da curva KS se solicitado."""
+    """Calcula a estatística KS, retornando também o melhor limiar e a porcentagem correspondente"""
 
     y_true_arr = _encode_binary_labels(y_true)
     y_score_arr = _to_numpy(y_score).astype(float)
@@ -328,6 +327,9 @@ def train_model(
     patience: int = DEFAULT_EARLY_STOPPING_PATIENCE,
     min_delta: float = DEFAULT_EARLY_STOPPING_DELTA,
 ) -> Dict[str, Any]:
+    """Recebe também os dados de validação para calcular a perda de validação ao final do treinamento e retornar junto com o modelo treinado. 
+    O modelo retornado é o melhor encontrado durante o processo, considerando early stopping."""
+    
     device = device or get_default_device()
     loss_fn = loss_fn or get_loss_fn()
 
