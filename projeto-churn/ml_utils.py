@@ -336,7 +336,7 @@ def train_model(
     val_loader = prepare_dataloader(X_val, y_val, batch_size=batch_size, shuffle=False)
 
     history = []
-    best_loss = -np.inf
+    best_loss = np.inf
     best_state = None
     patience_counter = 0
     epochs_loss = 0
@@ -347,8 +347,8 @@ def train_model(
         epochs_loss += train_loss
         avg_loss = epochs_loss / len(history)
 
-        if best_loss < avg_loss - min_delta:
-            best_loss = train_loss
+        if avg_loss < best_loss - min_delta:
+            best_loss = avg_loss
             best_state = deepcopy(model.state_dict())
             patience_counter = 0
         else:
