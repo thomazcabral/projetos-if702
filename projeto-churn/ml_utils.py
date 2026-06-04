@@ -520,9 +520,12 @@ def _suggest_from_space(trial: Any, space: Dict[str, Dict[str, Any]]) -> Dict[st
 
 
 def _split_model_and_train_params(model_class: Any, params: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    signature = inspect.signature(model_class.__init__)
-    init_params = set(signature.parameters.keys())
-    init_params.discard("self")
+    try:
+        init_params = set(model_class().get_params().keys())
+    except Exception:
+        signature = inspect.signature(model_class.__init__)
+        init_params = set(signature.parameters.keys())
+        init_params.discard("self")
 
     model_params = {}
     train_params = {}

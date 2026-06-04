@@ -1,0 +1,43 @@
+{
+  "model_name": "XGBoost",
+  "best_params": {
+    "n_estimators": 433,
+    "max_depth": 9,
+    "learning_rate": 0.0014349708088042794,
+    "subsample": 0.5566948986105161,
+    "colsample_bytree": 0.4191759361797791,
+    "reg_alpha": 0.0002197777396581099,
+    "reg_lambda": 0.007587218485697329,
+    "min_child_weight": 1,
+    "gamma": 0.6627972889165209
+  },
+  "best_score": 0.5189481825212683,
+  "train_metrics": {
+    "accuracy": 0.8892539621182838,
+    "precision": 0.8575994318181818,
+    "recall": 0.9335137224584461,
+    "f1": 0.8939478067740144,
+    "auroc": 0.9524536840785652,
+    "ks_stat": 0.7862388867413993,
+    "confusion_matrix": {
+      "tn": 2186,
+      "fp": 401,
+      "fn": 172,
+      "tp": 2415
+    }
+  },
+  "test_metrics": {
+    "accuracy": 0.7599318955732123,
+    "precision": 0.5352112676056338,
+    "recall": 0.7307692307692307,
+    "f1": 0.6178861788617886,
+    "auroc": 0.8367399173040595,
+    "ks_stat": 0.5196204705478276,
+    "confusion_matrix": {
+      "tn": 997,
+      "fp": 297,
+      "fn": 126,
+      "tp": 342
+    }
+  }
+}

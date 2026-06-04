@@ -146,11 +146,11 @@ def encode_categorical_features(
         X_val_binary[col_name] = _encode_binary_labels(
             X_val[col].values,
             positive_value=pos_value,
-        )
+        )[0]
         X_test_binary[col_name] = _encode_binary_labels(
             X_test[col].values,
             positive_value=pos_value,
-        )
+        )[0]
 
     ### Codificação de colunas categóricas com mais de 2 categorias (Vira uma coluna numérica com os índices das categorias)
     X_train_multi = pd.DataFrame(index=X_train.index)
@@ -167,11 +167,11 @@ def encode_categorical_features(
         X_val_multi[col] = _encode_multi_labels(
             X_val[col].values,
             mapping=mapping,
-        )
+        )[0]
         X_test_multi[col] = _encode_multi_labels(
             X_test[col].values,
             mapping=mapping,
-        )
+        )[0]
 
     X_train_encoded = pd.concat([X_train.drop(columns=cat_cols), X_train_binary, X_train_multi], axis=1)
     X_val_encoded = pd.concat([X_val.drop(columns=cat_cols), X_val_binary, X_val_multi], axis=1)
@@ -199,13 +199,13 @@ def preprocess_data(
     val_df = _coerce_numeric_columns(val_df, target_col)
     test_df = _coerce_numeric_columns(test_df, target_col)
 
-    y_train = _encode_binary_labels(train_df[target_col].values)
+    y_train, _ = _encode_binary_labels(train_df[target_col].values)
     X_train = train_df.drop(columns=[target_col])
 
-    y_val = _encode_binary_labels(val_df[target_col].values)
+    y_val, _ = _encode_binary_labels(val_df[target_col].values)
     X_val = val_df.drop(columns=[target_col])
 
-    y_test = _encode_binary_labels(test_df[target_col].values)
+    y_test, _ = _encode_binary_labels(test_df[target_col].values)
     X_test = test_df.drop(columns=[target_col])
 
     numeric_cols = X_train.select_dtypes(include=[np.number]).columns

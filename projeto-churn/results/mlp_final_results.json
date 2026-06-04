@@ -1,0 +1,44 @@
+{
+  "model_name": "MLP",
+  "best_params": {
+    "hidden_layer_sizes": [
+      1024,
+      384
+    ],
+    "alpha": 0.019301771611401435,
+    "learning_rate_init": 0.0016670955595492107,
+    "max_iter": 147,
+    "learning_rate": "adaptive",
+    "solver": "adam",
+    "batch_size": 256
+  },
+  "best_score": 0.4547563805104408,
+  "train_metrics": {
+    "accuracy": 0.9690761499806726,
+    "precision": 0.9694390715667311,
+    "recall": 0.968689601855431,
+    "f1": 0.9690641918020109,
+    "auroc": 0.996519647388021,
+    "ks_stat": 0.945883262466177,
+    "confusion_matrix": {
+      "tn": 2508,
+      "fp": 79,
+      "fn": 81,
+      "tp": 2506
+    }
+  },
+  "test_metrics": {
+    "accuracy": 0.7531214528944381,
+    "precision": 0.5413533834586466,
+    "recall": 0.46153846153846156,
+    "f1": 0.4982698961937716,
+    "auroc": 0.7693752559478988,
+    "ks_stat": 0.4324660827752017,
+    "confusion_matrix": {
+      "tn": 1111,
+      "fp": 183,
+      "fn": 252,
+      "tp": 216
+    }
+  }
+}
