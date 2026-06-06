@@ -22,3 +22,4 @@ xgboost>=1.7    # Modelo mais pesado
 ipykernel>=6.15
 
 pykan
+tabkan

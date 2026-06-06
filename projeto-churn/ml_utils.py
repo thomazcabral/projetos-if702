@@ -558,7 +558,13 @@ def _is_sklearn_compatible_model_class(model_class: Any) -> bool:
         or module_name.startswith("catboost.")
     )
 
-def _preprocess_model_params(model_class: Any, model_params: Dict[str, Any], train_params: Dict[str, Any], X_train: Any) -> Dict[str, Any]:
+def _preprocess_model_params(
+    model_class: Any,
+    model_params: Dict[str, Any],
+    train_params: Dict[str, Any],
+    X_train: Any,
+    extra_context: Dict[str, Any] = {},
+) -> Dict[str, Any]:
     try:
         from kan import KAN
         if issubclass(model_class, KAN):
@@ -570,6 +576,21 @@ def _preprocess_model_params(model_class: Any, model_params: Dict[str, Any], tra
             model_params["grid_range"] = [-2.0, 2.0]
     except ImportError:
         pass
+
+    try:
+        from tabkan import ChebyshevKAN
+        if issubclass(model_class, ChebyshevKAN):
+            n_features = _to_numpy(X_train).shape[1]
+            arch_idx = train_params.pop("architecture_idx", model_params.pop("architecture_idx", None))
+            architectures = extra_context.get("tabkan_architectures")
+            if arch_idx is None or architectures is None:
+                raise ValueError("architecture_idx ou tabkan_architectures não encontrados.")
+            arch = architectures[int(arch_idx)]
+            model_params["layers"] = [n_features] + arch["layers_hidden"] + [1]
+            model_params["orders"] = arch["orders"]
+    except ImportError:
+        pass
+
     return model_params
 
 def _resolve_objective_score(
@@ -656,10 +677,14 @@ def optuna_objective(
     threshold: float = 0.5,
     loss_fn: Optional[nn.Module] = None,
     optimizer_class: Any = torch.optim.Adam,
+    extra_context: Dict[str, Any] = {},
 ) -> float:
     params = _suggest_from_space(trial, space)
     model_params, train_params = _split_model_and_train_params(model_class, params)
-    model_params = _preprocess_model_params(model_class, model_params, train_params, X_train)
+    model_params = _preprocess_model_params(
+    model_class, model_params, train_params, X_train,
+    extra_context=extra_context,
+)
 
     batch_size = train_params.pop("batch_size", None)
     lr = train_params.pop("lr", train_params.pop("learning_rate", 1e-3))
