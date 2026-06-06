@@ -126,9 +126,10 @@ def _evaluate_loss(
     with torch.no_grad():
         for batch_X, batch_y in dataloader:
             batch_X = batch_X.to(device)
-            batch_y = batch_y.to(device)
+            batch_y = batch_y.to(device).float()
 
             outputs = model(batch_X)
+            outputs = outputs.squeeze(-1)
             loss = loss_fn(outputs, batch_y)
             running_loss += loss.item() * batch_X.size(0)
 
@@ -300,10 +301,11 @@ def train_one_epoch(
     running_loss = 0.0
     for batch_X, batch_y in dataloader:
         batch_X = batch_X.to(device)
-        batch_y = batch_y.to(device)
+        batch_y = batch_y.to(device).float()
 
         optimizer.zero_grad()
         outputs = model(batch_X)
+        outputs = outputs.squeeze(-1)
         loss = loss_fn(outputs, batch_y)
         loss.backward()
         optimizer.step()
@@ -329,7 +331,8 @@ def train_model(
 ) -> Dict[str, Any]:
     """Recebe também os dados de validação para calcular a perda de validação ao final do treinamento e retornar junto com o modelo treinado. 
     O modelo retornado é o melhor encontrado durante o processo, considerando early stopping."""
-    
+
+    batch_size = batch_size or 32
     device = device or get_default_device()
     loss_fn = loss_fn or get_loss_fn()
 
@@ -555,6 +558,19 @@ def _is_sklearn_compatible_model_class(model_class: Any) -> bool:
         or module_name.startswith("catboost.")
     )
 
+def _preprocess_model_params(model_class: Any, model_params: Dict[str, Any], train_params: Dict[str, Any], X_train: Any) -> Dict[str, Any]:
+    try:
+        from kan import KAN
+        if issubclass(model_class, KAN):
+            n_features = _to_numpy(X_train).shape[1]
+            hidden_dim = train_params.pop("hidden_dim", model_params.pop("hidden_dim", None))
+            if hidden_dim is None:
+                raise ValueError("hidden_dim não encontrado nos parâmetros.")
+            model_params["width"] = [n_features, hidden_dim, 1]
+            model_params["grid_range"] = [-2.0, 2.0]
+    except ImportError:
+        pass
+    return model_params
 
 def _resolve_objective_score(
     y_true: Any,
@@ -643,6 +659,7 @@ def optuna_objective(
 ) -> float:
     params = _suggest_from_space(trial, space)
     model_params, train_params = _split_model_and_train_params(model_class, params)
+    model_params = _preprocess_model_params(model_class, model_params, train_params, X_train)
 
     batch_size = train_params.pop("batch_size", None)
     lr = train_params.pop("lr", train_params.pop("learning_rate", 1e-3))
