@@ -704,6 +704,7 @@ def optuna_objective(
     if not (is_torch or is_sklearn):
         raise ValueError("Unsupported model class for Optuna objective.")
 
+    torch.manual_seed(RANDOM_STATE_MODEL)
     model = model_class(**model_params)
     scores = None
     preds = None
