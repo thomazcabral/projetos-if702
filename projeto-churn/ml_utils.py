@@ -549,13 +549,16 @@ def _is_torch_model_class(model_class: Any) -> bool:
 
 
 def _is_sklearn_compatible_model_class(model_class: Any) -> bool:
-    """Modelos que usam fit e predict_proba, como XGBoost, LightGBM, CatBoost e muitos modelos do scikit-learn."""
+    """Modelos que usam fit e predict_proba."""
+
     module_name = getattr(model_class, "__module__", "")
+
     return (
         module_name.startswith("sklearn.")
         or module_name.startswith("xgboost.")
         or module_name.startswith("lightgbm.")
         or module_name.startswith("catboost.")
+        or module_name.startswith("tabpfn.")
     )
 
 def _preprocess_model_params(
