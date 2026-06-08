@@ -21,6 +21,8 @@ xgboost>=1.7    # Modelo mais pesado
 # Para rodar notebooks 
 ipykernel>=6.15
 
+# Libs de AutoML
 pykan
 tabkan
 TabPFN
+autogluon.tabular[mitra]
