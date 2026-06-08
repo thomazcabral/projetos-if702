@@ -1,12 +1,13 @@
 {
   "hidden_layer_sizes": [
     1024,
-    384
+    512,
+    128
   ],
-  "alpha": 0.019301771611401435,
-  "learning_rate_init": 0.0016670955595492107,
-  "max_iter": 147,
-  "learning_rate": "adaptive",
-  "solver": "adam",
-  "batch_size": 256
+  "alpha": 5.5646880460811174e-05,
+  "learning_rate_init": 0.00047467372028218605,
+  "max_iter": 289,
+  "learning_rate": "constant",
+  "solver": "sgd",
+  "batch_size": 64
 }
