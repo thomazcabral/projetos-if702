@@ -1,1 +1,2 @@
 projeto-churn/models/tabpfn_model.joblib filter=lfs diff=lfs merge=lfs -text
+projeto-churn/models/mitra_autogluon/models/Mitra/model.pt filter=lfs diff=lfs merge=lfs -text
