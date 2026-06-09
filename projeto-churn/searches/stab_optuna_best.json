@@ -1,0 +1,9 @@
+{
+  "input_dim": 19,
+  "num_layers": 1,
+  "num_heads": 4,
+  "embed_dim": 64,
+  "dropout_rate": 0.11016313804039828,
+  "learning_rate": 0.009602726920701743,
+  "batch_size": 128
+}

@@ -1,0 +1,41 @@
+{
+  "model_name": "STab",
+  "best_params": {
+    "input_dim": 19,
+    "num_layers": 1,
+    "num_heads": 4,
+    "embed_dim": 64,
+    "dropout_rate": 0.11016313804039828,
+    "learning_rate": 0.009602726920701743,
+    "batch_size": 128
+  },
+  "best_score": 0.522815158546017,
+  "train_metrics": {
+    "accuracy": 0.7721298801700812,
+    "precision": 0.7110311750599521,
+    "recall": 0.9168921530730576,
+    "f1": 0.8009454668242445,
+    "auroc": 0.864443758443133,
+    "ks_stat": 0.5612678778507925,
+    "confusion_matrix": {
+      "tn": 1623,
+      "fp": 964,
+      "fn": 215,
+      "tp": 2372
+    }
+  },
+  "test_metrics": {
+    "accuracy": 0.6838819523269013,
+    "precision": 0.450828729281768,
+    "recall": 0.8717948717948718,
+    "f1": 0.5943190094683175,
+    "auroc": 0.8275183621976513,
+    "ks_stat": 0.5011624988441062,
+    "confusion_matrix": {
+      "tn": 797,
+      "fp": 497,
+      "fn": 60,
+      "tp": 408
+    }
+  }
+}
