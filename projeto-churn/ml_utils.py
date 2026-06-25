@@ -105,12 +105,21 @@ def _predict_scores_torch(
 
 def _predict_scores_proba(model: Any, X: Any) -> np.ndarray:
     proba = model.predict_proba(X)
-    proba = np.asarray(proba)
-    if proba.ndim == 1:
-        return proba
-    if proba.shape[1] == 1:
-        return proba[:, 0]
-    return proba[:, 1]
+    if isinstance(proba, pd.DataFrame):
+        if 1 in proba.columns:
+            return proba[1].to_numpy()
+        if "1" in proba.columns:
+            return proba["1"].to_numpy()
+        return proba.iloc[:, -1].to_numpy()
+    if isinstance(proba, pd.Series):
+        return proba.to_numpy()
+
+    proba_array = np.asarray(proba)
+    if proba_array.ndim == 1:
+        return proba_array
+    if proba_array.shape[1] == 1:
+        return proba_array[:, 0]
+    return proba_array[:, -1]
 
 
 def _evaluate_loss(
