@@ -1,9 +1,13 @@
 {
   "input_dim": 19,
   "num_layers": 1,
-  "num_heads": 4,
+  "num_heads": 8,
   "embed_dim": 64,
-  "dropout_rate": 0.11016313804039828,
-  "learning_rate": 0.009602726920701743,
-  "batch_size": 128
+  "dropout_rate": 0.7,
+  "dropconnect_rate": 0.5,
+  "learning_rate": 0.0002,
+  "batch_size": 128,
+  "optimizer": "AdamW",
+  "weight_decay": 0.0001,
+  "lr_scheduler": "ReduceLROnPlateau"
 }
