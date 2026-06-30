@@ -220,3 +220,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Temp files for google drive
+.tmp.drivedownload
+.tmp.driveupload
