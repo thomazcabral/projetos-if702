@@ -184,7 +184,7 @@ def preprocess_data(
     val_df: pd.DataFrame,
     test_df: pd.DataFrame,
     target_col: str = "Churn",
-    scaler: Optional[RobustScaler] = None,
+    scaler: Optional[Any] = None,
 ) -> Tuple[
     np.ndarray,
     np.ndarray,
