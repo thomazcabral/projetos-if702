@@ -256,7 +256,13 @@ def evaluate_model(
 
     scores = predict_scores(model, X, device=device, batch_size=batch_size)
     preds = (scores >= threshold).astype(int)
+    dataloader_loss = prepare_dataloader(X, y, batch_size=batch_size, shuffle=False)
+    loss_mse = _evaluate_loss(model, dataloader_loss, get_loss_fn("mse"), device or get_default_device())[0]
+    loss_ce = _evaluate_loss(model, dataloader_loss, get_loss_fn("cross_entropy"), device or get_default_device())[0]
+
     metrics = compute_metrics(y, preds, scores)
+    metrics["mse"] = loss_mse
+    metrics["cross_entropy"] = loss_ce
 
     return metrics, preds, scores
 
