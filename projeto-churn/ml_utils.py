@@ -359,16 +359,17 @@ def train_model(
     best_loss = np.inf
     best_state = None
     patience_counter = 0
-    epochs_loss = 0
-    
+    val_loss = np.inf
+    val_scores = None
+
     for _ in range(int(epochs)):
         train_loss = train_one_epoch(model, train_loader, optimizer, loss_fn, device)
         history.append(train_loss)
-        epochs_loss += train_loss
-        avg_loss = epochs_loss / len(history)
 
-        if avg_loss < best_loss - min_delta:
-            best_loss = avg_loss
+        val_loss, val_scores = _evaluate_loss(model, val_loader, loss_fn, device)
+
+        if val_loss < best_loss - min_delta:
+            best_loss = val_loss
             best_state = deepcopy(model.state_dict())
             patience_counter = 0
         else:
@@ -376,8 +377,6 @@ def train_model(
             if patience_counter >= patience:
                 break
 
-    val_loss, val_scores = _evaluate_loss(model, val_loader, loss_fn, device)
-    
     if best_state is not None:
         model.load_state_dict(best_state)
 
